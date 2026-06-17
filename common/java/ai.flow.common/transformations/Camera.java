@@ -11,7 +11,11 @@ public class Camera {
 
     // lots of important stuff calculated from this
     // current set to LG G8 wide camera
-    public static float
+    // NOTE: these intrinsics can be updated at runtime by updateIntrinsics()
+    // (from a camerainfo file or auto-detected from the camera hardware) on the
+    // camera/main thread, while the model and UI threads read them. They are
+    // marked volatile so those threads reliably observe the updated values.
+    public static volatile float
         FocalX = utils.F2 ? 1672.33f : (FORCE_TELE_CAM_F3 ? 910f : 1600f), //1394.7081f,
         FocalY = utils.F2 ? 1672.33f : (FORCE_TELE_CAM_F3 ? 910f : 1600f), //1394.7616f,
         CenterX = utils.F2 ? 900f : 952.62915f,
@@ -25,13 +29,13 @@ public class Camera {
     public static boolean intrinsicsLoadedFromFile = false;
 
     // everything autocalculated below
-    public static float actual_cam_focal_length = (FocalX + FocalY) * 0.5f;
-    public static float digital_zoom_apply = actual_cam_focal_length / (utils.F2 ? Model.MEDMODEL_F2_FL : Model.MEDMODEL_FL);
+    public static volatile float actual_cam_focal_length = (FocalX + FocalY) * 0.5f;
+    public static volatile float digital_zoom_apply = actual_cam_focal_length / (utils.F2 ? Model.MEDMODEL_F2_FL : Model.MEDMODEL_FL);
     public static final int[] frameSize = new int[]{1920, 1080};
-    public static float OffsetX = CenterX - (frameSize[0]*0.5f);
-    public static float OffsetY = CenterY - (frameSize[1]*0.5f);
+    public static volatile float OffsetX = CenterX - (frameSize[0]*0.5f);
+    public static volatile float OffsetY = CenterY - (frameSize[1]*0.5f);
 
-    public static float[] CameraIntrinsics = {
+    public static volatile float[] CameraIntrinsics = {
             FocalX, 0.0f, frameSize[0] * 0.5f + OffsetX * digital_zoom_apply,
             0.0f, FocalY, frameSize[1] * 0.5f + OffsetY * digital_zoom_apply,
             0.0f,   0.0f, 1.0f
@@ -41,7 +45,7 @@ public class Camera {
     public static final int CAMERA_TYPE_ROAD = 0;
     public static final int CAMERA_TYPE_WIDE = 1;
     public static final int CAMERA_TYPE_DRIVER = 2;
-    public static INDArray cam_intrinsics = Nd4j.createFromArray(new float[][]{
+    public static volatile INDArray cam_intrinsics = Nd4j.createFromArray(new float[][]{
             { CameraIntrinsics[0],  0.0f,  CameraIntrinsics[2]},
             {0.0f,  CameraIntrinsics[4],  CameraIntrinsics[5]},
             {0.0f,  0.0f,  1.0f}

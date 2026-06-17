@@ -81,6 +81,8 @@ public class SettingsScreen extends ScreenAdapter {
         addKeyValueTable(currentSettingTable, "Device Manufacturer", deviceManufacturer, true);
         String deviceModel = params.exists("DeviceModel") ? params.getString("DeviceModel") : "";
         addKeyValueTable(currentSettingTable, "Device Name", deviceModel, true);
+        if (params.exists("DeviceCameraFocalPx"))
+            addKeyValueTable(currentSettingTable, "Camera Focal Length (px)", params.getString("DeviceCameraFocalPx"), true);
         addKeyValueTable(currentSettingTable, "Log Out", buttonLogOut, true);
         addKeyValueTable(currentSettingTable, "Reset Extrinsic Calibration", buttonCalibrateExtrinsic, true);
         addKeyValueTable(currentSettingTable, "Review Training Guide", buttonTraining, true);

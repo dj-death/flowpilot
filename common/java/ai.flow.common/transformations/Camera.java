@@ -19,6 +19,11 @@ public class Camera {
 
     public static int UseCameraID = utils.F2 ? 0 : 2;
 
+    // set to true once the camera intrinsics have been provided explicitly
+    // (e.g. via a camerainfo override file). When true, runtime auto-detection
+    // of the intrinsics from the camera hardware is skipped.
+    public static boolean intrinsicsLoadedFromFile = false;
+
     // everything autocalculated below
     public static float actual_cam_focal_length = (FocalX + FocalY) * 0.5f;
     public static float digital_zoom_apply = actual_cam_focal_length / (utils.F2 ? Model.MEDMODEL_F2_FL : Model.MEDMODEL_FL);
@@ -53,4 +58,27 @@ public class Camera {
             0.0f,   910f, 514f,
             0.0f,   0.0f, 1.0f
     };*/
+
+    // Recompute every derived intrinsic value from FocalX/FocalY/CenterX/CenterY.
+    // Call this after changing any of those (e.g. when loading them from a file or
+    // auto-detecting them from the camera hardware) so the rest of the pipeline
+    // picks up the new values.
+    public static void updateIntrinsics() {
+        actual_cam_focal_length = (FocalX + FocalY) * 0.5f;
+        digital_zoom_apply = actual_cam_focal_length / (utils.F2 ? Model.MEDMODEL_F2_FL : Model.MEDMODEL_FL);
+        OffsetX = CenterX - (frameSize[0] * 0.5f);
+        OffsetY = CenterY - (frameSize[1] * 0.5f);
+
+        CameraIntrinsics = new float[] {
+                FocalX, 0.0f, frameSize[0] * 0.5f + OffsetX * digital_zoom_apply,
+                0.0f, FocalY, frameSize[1] * 0.5f + OffsetY * digital_zoom_apply,
+                0.0f,   0.0f, 1.0f
+        };
+
+        cam_intrinsics = Nd4j.createFromArray(new float[][]{
+                { CameraIntrinsics[0],  0.0f,  CameraIntrinsics[2]},
+                {0.0f,  CameraIntrinsics[4],  CameraIntrinsics[5]},
+                {0.0f,  0.0f,  1.0f}
+        });
+    }
 }

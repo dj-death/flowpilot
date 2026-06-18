@@ -2,6 +2,7 @@ package ai.flow.app;
 
 import ai.flow.app.helpers.GifDecoder;
 import ai.flow.app.helpers.Utils;
+import ai.flow.common.OBDData;
 import ai.flow.common.ParamsInterface;
 import ai.flow.common.Path;
 import ai.flow.common.transformations.Camera;
@@ -9,6 +10,7 @@ import ai.flow.common.utils;
 import ai.flow.definitions.CarDefinitions.CarControl.HUDControl.AudibleAlert;
 import ai.flow.definitions.Definitions;
 import ai.flow.modeld.CommonModelF3;
+import ai.flow.modeld.LeadDataV3;
 import ai.flow.modeld.ModelExecutor;
 import ai.flow.modeld.ModelExecutorF3;
 import ai.flow.modeld.ParsedOutputs;
@@ -127,6 +129,10 @@ public class OnRoadScreen extends ScreenAdapter {
     ScrollPane notificationScrollPane;
     ImageButton settingsButton;
     ParsedOutputs parsed = new ParsedOutputs();
+    // ELM327 advisory mode: openpilot can't control the car, so spoken cues are
+    // announced instead. Set once from the UseELM327 param.
+    boolean advisoryMode = false;
+    long lastLeadAdvisoryMs = 0;
     int canErrCount = 0;
     int canErrCountPrev = 0;
     int canMisses = 0;
@@ -415,6 +421,7 @@ public class OnRoadScreen extends ScreenAdapter {
         velocityUnitLabel = new Label("", appContext.skin, "default-font", "white");
         velocityUnitLabel.setColor(0.5f, 1f, 0.5f, 1f);
         isMetric = params.existsAndCompare("IsMetric", true);
+        advisoryMode = params.getBool("UseELM327");
 
         alertText1 = new Label("Flowpilot Unavailable", appContext.skin, "default-font-bold-med", "white");
         alertText2 = new Label("Waiting for controls to start", appContext.skin, "default-font", "white");
@@ -605,6 +612,32 @@ public class OnRoadScreen extends ScreenAdapter {
             //lead2s = Draw.getTriangleCameraFrame(parsed.leads.get(1), K, Rt, leadDrawScale);
             //lead3s = Draw.getTriangleCameraFrame(parsed.leads.get(2), K, Rt, leadDrawScale);
         }
+
+        if (advisoryMode)
+            runAdvisory();
+    }
+
+    // In ELM327 advisory mode openpilot cannot brake, so announce a spoken warning when the
+    // model is confident about a close lead vehicle. This uses the camera model output
+    // (always available) plus the ELM327 speed; thresholds are conservative and may need
+    // on-road tuning. Debounced so it speaks at most once every few seconds.
+    private void runAdvisory() {
+        LeadDataV3 lead = parsed.leads.get(0);
+        if (lead == null || lead.x == null || lead.x.length == 0 || lead.prob < 0.5f)
+            return;
+
+        float distM = lead.x[0];                          // distance to lead, meters
+        float egoMs = OBDData.speedKph / 3.6f;            // our speed from the ELM327, m/s
+        boolean moving = !Float.isNaN(egoMs) && egoMs > 2.0f;
+        float headwaySec = moving ? distM / egoMs : Float.MAX_VALUE;
+
+        if (distM < 12.0f || (moving && headwaySec < 1.4f)) {
+            long now = System.currentTimeMillis();
+            if (now - lastLeadAdvisoryMs > 5000) {
+                appContext.hardwareManager.announce("Vehicle ahead, slow down");
+                lastLeadAdvisoryMs = now;
+            }
+        }
     }
 
     public void handleSounds(Definitions.ControlsState.Reader controlState, AudibleAlert alert){
@@ -618,6 +651,14 @@ public class OnRoadScreen extends ScreenAdapter {
         if (currentAudibleAlert == alert)
             return;
         currentAudibleAlert = alert;
+
+        // In advisory mode, also speak openpilot's own alert text aloud (e.g. "Brake!",
+        // "Take Control") since the car isn't being controlled. Fires once per alert change.
+        if (advisoryMode && alert != AudibleAlert.NONE && controlState != null) {
+            String spoken = controlState.getAlertText1().toString();
+            if (spoken != null && !spoken.isEmpty())
+                appContext.hardwareManager.announce(spoken);
+        }
 
         for (AudibleAlert repeatAlerts : repeatingAlerts){
             soundAlerts.get(repeatAlerts).stop();

@@ -133,6 +133,12 @@ public class OnRoadScreen extends ScreenAdapter {
     // announced instead. Set once from the UseELM327 param.
     boolean advisoryMode = false;
     long lastLeadAdvisoryMs = 0;
+    long lastLaneDepartureMs = 0;
+    long lastCurveAdvisoryMs = 0;
+    // advisory tuning (conservative defaults; tune on-road)
+    static final float LANE_DEPARTURE_DIST_M = 1.0f;     // warn when an ego lane line is closer than this
+    static final float CURVE_YAW_RAD = 0.15f;            // ~8.6 deg predicted heading change => curve
+    static final int CURVE_LOOKAHEAD_IDX = 20;           // trajectory index (~2-3 s ahead)
     int canErrCount = 0;
     int canErrCountPrev = 0;
     int canMisses = 0;
@@ -617,11 +623,19 @@ public class OnRoadScreen extends ScreenAdapter {
             runAdvisory();
     }
 
-    // In ELM327 advisory mode openpilot cannot brake, so announce a spoken warning when the
-    // model is confident about a close lead vehicle. This uses the camera model output
-    // (always available) plus the ELM327 speed; thresholds are conservative and may need
-    // on-road tuning. Debounced so it speaks at most once every few seconds.
+    // In ELM327 advisory mode openpilot cannot control the car, so it announces the actions
+    // it would take as spoken cues. These use the camera model output (always available
+    // without a panda) plus the ELM327 speed. Thresholds are conservative and may need
+    // on-road tuning; each cue is debounced so it speaks at most once every few seconds.
     private void runAdvisory() {
+        long now = System.currentTimeMillis();
+        runLeadAdvisory(now);
+        runLaneDepartureAdvisory(now);
+        runCurveAdvisory(now);
+    }
+
+    // Longitudinal: warn about a close lead vehicle (would-be braking).
+    private void runLeadAdvisory(long now) {
         LeadDataV3 lead = parsed.leads.get(0);
         if (lead == null || lead.x == null || lead.x.length == 0 || lead.prob < 0.5f)
             return;
@@ -632,11 +646,47 @@ public class OnRoadScreen extends ScreenAdapter {
         float headwaySec = moving ? distM / egoMs : Float.MAX_VALUE;
 
         if (distM < 12.0f || (moving && headwaySec < 1.4f)) {
-            long now = System.currentTimeMillis();
             if (now - lastLeadAdvisoryMs > 5000) {
                 appContext.hardwareManager.announce("Vehicle ahead, slow down");
                 lastLeadAdvisoryMs = now;
             }
+        }
+    }
+
+    // Lateral: warn when the car drifts close to a high-confidence ego lane line (would-be
+    // lane-keeping correction). Only active above ~30 km/h, like a normal lane-departure warning.
+    private void runLaneDepartureAdvisory(long now) {
+        float egoMs = OBDData.speedKph / 3.6f;
+        if (Float.isNaN(egoMs) || egoMs < 8.3f)           // ~30 km/h
+            return;
+
+        // laneLines: 0=far-left, 1=left ego, 2=right ego, 3=far-right; get(1)[] is lateral y.
+        float distToLeft = parsed.laneLines.get(1).get(1)[0];     // +y is left
+        float distToRight = -parsed.laneLines.get(2).get(1)[0];   // right line y is negative
+
+        String drift = null;
+        if (parsed.laneLineProbs[1] > 0.5f && distToLeft < LANE_DEPARTURE_DIST_M)
+            drift = "Lane departure, drifting left";
+        else if (parsed.laneLineProbs[2] > 0.5f && distToRight < LANE_DEPARTURE_DIST_M)
+            drift = "Lane departure, drifting right";
+
+        if (drift != null && now - lastLaneDepartureMs > 4000) {
+            appContext.hardwareManager.announce(drift);
+            lastLaneDepartureMs = now;
+        }
+    }
+
+    // Lateral: warn about an upcoming curve (would-be steering) using the model's predicted
+    // heading change a couple of seconds ahead.
+    private void runCurveAdvisory(long now) {
+        float[] yaw = parsed.orientation.get(2);          // predicted yaw (rad) along the path
+        if (yaw == null || yaw.length <= CURVE_LOOKAHEAD_IDX)
+            return;
+
+        float futureYaw = yaw[CURVE_LOOKAHEAD_IDX];
+        if (Math.abs(futureYaw) > CURVE_YAW_RAD && now - lastCurveAdvisoryMs > 6000) {
+            appContext.hardwareManager.announce(futureYaw > 0 ? "Curve ahead on the left" : "Curve ahead on the right");
+            lastCurveAdvisoryMs = now;
         }
     }
 

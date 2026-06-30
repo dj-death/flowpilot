@@ -55,21 +55,7 @@ def fill_lane_line_meta(builder, lane_lines, lane_line_probs):
   builder.rightY = lane_lines[2].y[0]
   builder.rightProb = lane_line_probs[2]
 
-def fill_driving_model_data(msg: capnp._DynamicStructBuilder, modelv2_send: capnp._DynamicStructBuilder) -> None:
-  msg.valid = modelv2_send.valid
-  modelV2 = modelv2_send.modelV2
-  driving_model_data = msg.drivingModelData
-  driving_model_data.frameId = modelV2.frameId
-  driving_model_data.frameIdExtra = modelV2.frameIdExtra
-  driving_model_data.frameDropPerc = modelV2.frameDropPerc
-  driving_model_data.modelExecutionTime = modelV2.modelExecutionTime
-  driving_model_data.action = modelV2.action
-  driving_model_data.meta.laneChangeState = modelV2.meta.laneChangeState
-  driving_model_data.meta.laneChangeDirection = modelV2.meta.laneChangeDirection
-  fill_lane_line_meta(driving_model_data.laneLineMeta, modelV2.laneLines, modelV2.laneLineProbs)
-  fill_xyz_poly(driving_model_data.path, ModelConstants.POLY_PATH_DEGREE, modelV2.position.x, modelV2.position.y, modelV2.position.z)
-
-def fill_model_msg(msg: capnp._DynamicStructBuilder, net_output_data: dict[str, np.ndarray], action: log.ModelDataV2.Action,
+def fill_model_msg(msg: capnp._DynamicStructBuilder, net_output_data: dict[str, np.ndarray],
                    publish_state: PublishState, vipc_frame_id: int, vipc_frame_id_extra: int,
                    frame_id: int, frame_drop: float, timestamp_eof: int, model_execution_time: float,
                    valid: bool) -> None:
@@ -91,9 +77,6 @@ def fill_model_msg(msg: capnp._DynamicStructBuilder, net_output_data: dict[str, 
   fill_xyzt(modelV2.acceleration, ModelConstants.T_IDXS, *net_output_data['plan'][0,:,Plan.ACCELERATION].T)
   fill_xyzt(modelV2.orientation, ModelConstants.T_IDXS, *net_output_data['plan'][0,:,Plan.T_FROM_CURRENT_EULER].T)
   fill_xyzt(modelV2.orientationRate, ModelConstants.T_IDXS, *net_output_data['plan'][0,:,Plan.ORIENTATION_RATE].T)
-
-  # action
-  modelV2.action = action
 
   # times at X_IDXS of edges and lines aren't used
   LINE_T_IDXS: list[float] = []
@@ -135,8 +118,6 @@ def fill_model_msg(msg: capnp._DynamicStructBuilder, net_output_data: dict[str, 
   disengage_predictions.brake3MetersPerSecondSquaredProbs = net_output_data['meta'][0,Meta.HARD_BRAKE_3].tolist()
   disengage_predictions.brake4MetersPerSecondSquaredProbs = net_output_data['meta'][0,Meta.HARD_BRAKE_4].tolist()
   disengage_predictions.brake5MetersPerSecondSquaredProbs = net_output_data['meta'][0,Meta.HARD_BRAKE_5].tolist()
-  disengage_predictions.gasPressProbs = net_output_data['meta'][0,Meta.GAS_PRESS].tolist()
-  disengage_predictions.brakePressProbs = net_output_data['meta'][0,Meta.BRAKE_PRESS].tolist()
 
   publish_state.prev_brake_5ms2_probs[:-1] = publish_state.prev_brake_5ms2_probs[1:]
   publish_state.prev_brake_5ms2_probs[-1] = net_output_data['meta'][0,Meta.HARD_BRAKE_5][0]

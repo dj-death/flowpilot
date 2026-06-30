@@ -15,7 +15,6 @@ from common.filter_simple import FirstOrderFilter
 from common.realtime import config_realtime_process, DT_MDL
 from system.camerad.cameras.nv12_info import get_nv12_info
 from selfdrive.controls.lib.desire_helper import DesireHelper
-from selfdrive.controls.lib.drive_helpers import get_accel_from_plan, smooth_value, get_curvature_from_plan  # FIXME: MISSING from flowpilot's drive_helpers.py
 from selfdrive.modeld.parse_model_outputs import Parser
 from selfdrive.modeld.compile_modeld import make_input_queues, WARP_INPUTS, POLICY_INPUTS
 from selfdrive.modeld.fill_model_msg import fill_model_msg, fill_pose_msg, PublishState
@@ -29,34 +28,6 @@ SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 LAT_SMOOTH_SECONDS = 0.0
 LONG_SMOOTH_SECONDS = 0.3
 MIN_LAT_CONTROL_SPEED = 0.3
-
-
-def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
-                          lat_action_t: float, long_action_t: float, v_ego: float) -> log.ModelDataV2.Action:
-  if 'action' not in model_output:
-    plan = model_output['plan'][0]
-    desired_accel, should_stop = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
-                                                     plan[:,Plan.ACCELERATION][:,0],
-                                                     ModelConstants.T_IDXS,
-                                                     action_t=long_action_t)
-    desired_curvature = get_curvature_from_plan(plan[:,Plan.T_FROM_CURRENT_EULER][:,2],
-                                                plan[:,Plan.ORIENTATION_RATE][:,2],
-                                                ModelConstants.T_IDXS,
-                                                v_ego,
-                                                lat_action_t)
-  else:
-    desired_accel = model_output['action'][0,1]
-    desired_curvature = model_output['action'][0,0] / (max(1.0, v_ego))**2
-    should_stop = (v_ego < 0.3 and desired_accel < 0.1)
-  desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, LONG_SMOOTH_SECONDS)
-  if v_ego > MIN_LAT_CONTROL_SPEED:
-    desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, LAT_SMOOTH_SECONDS)
-  else:
-    desired_curvature = prev_action.desiredCurvature
-
-  return log.ModelDataV2.Action(desiredCurvature=float(desired_curvature),
-                                desiredAcceleration=float(desired_accel),
-                                shouldStop=bool(should_stop))
 
 
 class FrameMeta:
@@ -179,7 +150,6 @@ def main(demo=False):
   # TODO this needs more thought, use .2s extra for now to estimate other delays
   # TODO Move smooth seconds to action function
   long_delay = CP.longitudinalActuatorDelay + LONG_SMOOTH_SECONDS
-  prev_action = log.ModelDataV2.Action()
 
   DH = DesireHelper()
 
@@ -245,9 +215,7 @@ def main(demo=False):
       modelv2_send = messaging.new_message('modelV2')
       posenet_send = messaging.new_message('cameraOdometry')
 
-      action = get_action_from_model(model_output, prev_action, lat_action_t, long_action_t, v_ego)
-      prev_action = action
-      fill_model_msg(modelv2_send, model_output, action,
+      fill_model_msg(modelv2_send, model_output,
                      publish_state, meta_main.frame_id, meta_extra.frame_id, frame_id,
                      frame_drop_ratio, meta_main.timestamp_eof, model_execution_time, live_calib_seen)
 
@@ -256,8 +224,6 @@ def main(demo=False):
       r_lane_change_prob = desire_state[log.Desire.laneChangeRight]
       lane_change_prob = l_lane_change_prob + r_lane_change_prob
       DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob)
-      modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
-      modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
 
       fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, live_calib_seen)
       pm.send('modelV2', modelv2_send)

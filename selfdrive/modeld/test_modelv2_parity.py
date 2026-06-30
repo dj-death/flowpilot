@@ -1,7 +1,7 @@
 # selfdrive/modeld/test_modelv2_parity.py
 import numpy as np, onnxruntime as ort, pickle
-from openpilot.selfdrive.modeld.parse_model_outputs import Parser
-from openpilot.selfdrive.modeld.constants import ModelConstants
+from selfdrive.modeld.parse_model_outputs import Parser
+from selfdrive.modeld.constants import ModelConstants
 
 ONNX = "selfdrive/assets/models/driving/driving_supercombo.onnx"
 PKL  = "selfdrive/assets/models/driving/driving_tinygrad.pkl"

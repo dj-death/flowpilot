@@ -1,8 +1,8 @@
 # selfdrive/modeld/bench_driving_supercombo.py
 import pickle, time, numpy as np
 from tinygrad.tensor import Tensor
-from openpilot.selfdrive.modeld.compile_modeld import make_input_queues, WARP_INPUTS, POLICY_INPUTS
-from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
+from selfdrive.modeld.compile_modeld import make_input_queues, WARP_INPUTS, POLICY_INPUTS
+from system.camerad.cameras.nv12_info import get_nv12_info
 
 CAM_W, CAM_H = 1920, 1080
 PKL = "selfdrive/assets/models/driving/driving_tinygrad.pkl"

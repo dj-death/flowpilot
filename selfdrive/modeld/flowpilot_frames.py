@@ -1,6 +1,6 @@
 # selfdrive/modeld/flowpilot_frames.py
 import numpy as np
-from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
+from system.camerad.cameras.nv12_info import get_nv12_info
 
 def to_model_nv12(image: bytes, w: int, h: int, stride: int,
                   uv_pixel_stride: int, u_off: int, v_off: int) -> bytes:

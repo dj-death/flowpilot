@@ -5,27 +5,23 @@ from tinygrad.tensor import Tensor
 import time
 import pickle
 import numpy as np
-import openpilot.cereal.messaging as messaging
-from openpilot.cereal import log
-from opendbc.car.structs import car
-from openpilot.cereal.messaging import PubMaster, SubMaster
-from msgq.visionipc import VisionIpcClient, VisionStreamType, VisionBuf
-from opendbc.car.car_helpers import get_demo_car_params
-from openpilot.common.swaglog import cloudlog
-from openpilot.common.params import Params
-from openpilot.common.filter_simple import FirstOrderFilter
-from openpilot.common.realtime import config_realtime_process, DT_MDL
-from openpilot.common.transformations.camera import DEVICE_CAMERAS
-from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
-from openpilot.common.transformations.model import get_warp_matrix
-from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
-from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, smooth_value, get_curvature_from_plan
-from openpilot.selfdrive.modeld.parse_model_outputs import Parser
-from openpilot.selfdrive.modeld.compile_modeld import make_input_queues, WARP_INPUTS, POLICY_INPUTS
-from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_driving_model_data, fill_pose_msg, PublishState
-from openpilot.common.file_chunker import read_file_chunked, get_manifest_path
-from openpilot.selfdrive.modeld.constants import ModelConstants, Plan
-from openpilot.selfdrive.modeld.helpers import usbgpu_present, modeld_pkl_path, get_tg_input_devices
+import cereal.messaging as messaging
+from cereal import log
+from cereal import car
+from cereal.messaging import PubMaster, SubMaster
+from system.swaglog import cloudlog
+from common.params import Params
+from common.filter_simple import FirstOrderFilter
+from common.realtime import config_realtime_process, DT_MDL
+from system.camerad.cameras.nv12_info import get_nv12_info
+from selfdrive.controls.lib.desire_helper import DesireHelper
+from selfdrive.controls.lib.drive_helpers import get_accel_from_plan, smooth_value, get_curvature_from_plan  # FIXME: MISSING from flowpilot's drive_helpers.py
+from selfdrive.modeld.parse_model_outputs import Parser
+from selfdrive.modeld.compile_modeld import make_input_queues, WARP_INPUTS, POLICY_INPUTS
+from selfdrive.modeld.fill_model_msg import fill_model_msg, fill_pose_msg, PublishState
+from common.file_chunker import read_file_chunked, get_manifest_path
+from selfdrive.modeld.constants import ModelConstants, Plan
+from selfdrive.modeld.helpers import usbgpu_present, modeld_pkl_path, get_tg_input_devices
 
 PROCESS_NAME = "openpilot.selfdrive.modeld.modeld"
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
@@ -100,7 +96,7 @@ class ModelState:
     parsed_model_outputs = {k: model_outputs[np.newaxis, v] for k,v in output_slices.items()}
     return parsed_model_outputs
 
-  def run(self, bufs: dict[str, VisionBuf], transforms: dict[str, np.ndarray],
+  def run(self, bufs: dict[str, np.ndarray], transforms: dict[str, np.ndarray],
           inputs: dict[str, np.ndarray]) -> dict[str, np.ndarray] | None:
     for key in bufs.keys():
       ptr = np.frombuffer(bufs[key].data, dtype=np.uint8).ctypes.data
@@ -147,8 +143,6 @@ def main(demo=False):
   config_realtime_process(7, 54)
 
   # flowpilot frame subscribers (no VisionIPC)
-  import zmq
-  from cereal import messaging as fp_msg
   frame_sub = messaging.SubMaster(["roadCameraState", "wideRoadCameraState"])
   road_buf_sock = messaging.sub_sock("roadCameraBuffer", conflate=True)
   wide_buf_sock = messaging.sub_sock("wideRoadCameraBuffer", conflate=True)
@@ -179,10 +173,7 @@ def main(demo=False):
   meta_main = FrameMeta()
   meta_extra = FrameMeta()
 
-  if demo:
-    CP = get_demo_car_params()
-  else:
-    CP = messaging.log_from_bytes(params.get("CarParams", block=True), car.CarParams)
+  CP = car.CarParams.from_bytes(params.get("CarParams", block=True))
   cloudlog.info("modeld got CarParams: %s", CP.brand)
 
   # TODO this needs more thought, use .2s extra for now to estimate other delays
@@ -192,7 +183,7 @@ def main(demo=False):
 
   DH = DesireHelper()
 
-  from openpilot.selfdrive.modeld.flowpilot_frames import read_frame
+  from selfdrive.modeld.flowpilot_frames import read_frame
   while True:
     rb = messaging.recv_one_or_none(road_buf_sock)
     wb = messaging.recv_one_or_none(wide_buf_sock)
@@ -210,8 +201,8 @@ def main(demo=False):
     v_ego = max(sm["carState"].vEgo, 0.)
     lat_delay = 0.2 + LAT_SMOOTH_SECONDS             # flowpilot has no liveDelay service
     if sm.updated["liveCalibration"]:
-      from openpilot.selfdrive.modeld.flowpilot_warp import warp_matrices
-      from openpilot.selfdrive.modeld.flowpilot_intrinsics import ROAD_INTRINSICS, WIDE_INTRINSICS
+      from selfdrive.modeld.flowpilot_warp import warp_matrices
+      from selfdrive.modeld.flowpilot_intrinsics import ROAD_INTRINSICS, WIDE_INTRINSICS
       rpy = np.array(sm["liveCalibration"].rpyCalib, dtype=np.float32)
       model_transform_main, model_transform_extra = warp_matrices(rpy, ROAD_INTRINSICS, WIDE_INTRINSICS)
       live_calib_seen = True

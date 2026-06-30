@@ -1,7 +1,7 @@
 # selfdrive/modeld/test_flowpilot_frames.py
 import numpy as np
-from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
-from openpilot.selfdrive.modeld.flowpilot_frames import to_model_nv12
+from system.camerad.cameras.nv12_info import get_nv12_info
+from selfdrive.modeld.flowpilot_frames import to_model_nv12
 
 def _synthetic(w, h, planar):
     y = (np.arange(w*h) % 256).astype(np.uint8)

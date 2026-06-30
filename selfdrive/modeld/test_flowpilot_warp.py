@@ -1,6 +1,6 @@
 # selfdrive/modeld/test_flowpilot_warp.py
 import numpy as np
-from openpilot.selfdrive.modeld.flowpilot_warp import warp_matrices
+from selfdrive.modeld.flowpilot_warp import warp_matrices
 
 ROAD = np.array([[910.,0,256.],[0,910.,322.],[0,0,1.]], np.float32)
 WIDE = np.array([[455.,0,256.],[0,455.,152.],[0,0,1.]], np.float32)

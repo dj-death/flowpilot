@@ -267,9 +267,8 @@ def _parse_size(s):
 
 
 def read_file_chunked_to_shm(path):
-  from openpilot.common.file_chunker import read_file_chunked
-  from openpilot.common.hardware.hw import Paths
-  with tempfile.NamedTemporaryFile(prefix='compile_modeld_', dir=Paths.shm_path(), delete=False) as f:
+  from common.file_chunker import read_file_chunked
+  with tempfile.NamedTemporaryFile(prefix='compile_modeld_', dir=None, delete=False) as f:
     f.write(read_file_chunked(path))
     tmp_path = f.name
   atexit.register(lambda: os.path.exists(tmp_path) and os.remove(tmp_path))
@@ -278,8 +277,8 @@ def read_file_chunked_to_shm(path):
 
 if __name__ == "__main__":
   from tinygrad.nn.onnx import OnnxRunner
-  from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
-  from openpilot.selfdrive.modeld.get_model_metadata import make_metadata_dict
+  from system.camerad.cameras.nv12_info import get_nv12_info
+  from selfdrive.modeld.get_model_metadata import make_metadata_dict
   p = argparse.ArgumentParser()
   p.add_argument('--model-size', type=_parse_size, required=True, help='model input WxH')
   p.add_argument('--camera-resolutions', type=_parse_size, nargs='+', required=True,

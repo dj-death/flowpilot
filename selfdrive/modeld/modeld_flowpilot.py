@@ -106,8 +106,6 @@ def main(demo=False):
   _compiled = os.path.isfile(get_manifest_path(modeld_pkl_path(usbgpu=True)))
   USBGPU = _present and _compiled
   params = Params()
-  params.put_bool("UsbGpuPresent", _present)
-  params.put_bool("UsbGpuCompiled", _compiled)
 
   config_realtime_process(7, 54)
 
@@ -143,21 +141,27 @@ def main(demo=False):
   meta_extra = FrameMeta()
 
   CP = car.CarParams.from_bytes(params.get("CarParams", block=True))
-  cloudlog.info("modeld got CarParams: %s", CP.brand)
+  cloudlog.info("modeld got CarParams: %s", CP.carName)
 
   # TODO this needs more thought, use .2s extra for now to estimate other delays
   # TODO Move smooth seconds to action function
-  long_delay = CP.longitudinalActuatorDelay + LONG_SMOOTH_SECONDS
+  long_delay = CP.longitudinalActuatorDelayUpperBound + LONG_SMOOTH_SECONDS
 
   DH = DesireHelper()
 
   from selfdrive.modeld.flowpilot_frames import read_frame
+  # recv_one_or_none is non-blocking + conflate, so road/wide buffers usually arrive on
+  # different loop iterations; latch each until its pair is available, then consume both.
+  last_rb, last_wb = None, None
   while True:
     rb = messaging.recv_one_or_none(road_buf_sock)
     wb = messaging.recv_one_or_none(wide_buf_sock)
+    if rb is not None: last_rb = rb
+    if wb is not None: last_wb = wb
     frame_sub.update(0)
-    if rb is None or wb is None:
+    if last_rb is None or last_wb is None:
       continue
+    rb, wb, last_rb, last_wb = last_rb, last_wb, None, None
     buf_main  = read_frame(rb.roadCameraBuffer,     frame_sub["roadCameraState"])
     buf_extra = read_frame(wb.wideRoadCameraBuffer, frame_sub["wideRoadCameraState"])
     meta_main, meta_extra = buf_main, buf_extra   # FlowpilotBuf carries frame_id/timestamps
@@ -165,7 +169,7 @@ def main(demo=False):
     sm.update(0)
     desire = DH.desire
     is_rhd = False                                   # flowpilot has no compatible driverMonitoringState
-    frame_id = sm["roadCameraState"].frameId if sm.seen["roadCameraState"] else meta_main.frame_id
+    frame_id = meta_main.frame_id
     v_ego = max(sm["carState"].vEgo, 0.)
     lat_delay = 0.2 + LAT_SMOOTH_SECONDS             # flowpilot has no liveDelay service
     if sm.updated["liveCalibration"]:
@@ -218,8 +222,8 @@ def main(demo=False):
                      frame_drop_ratio, meta_main.timestamp_eof, model_execution_time, live_calib_seen)
 
       desire_state = modelv2_send.modelV2.meta.desireState
-      l_lane_change_prob = desire_state[log.Desire.laneChangeLeft]
-      r_lane_change_prob = desire_state[log.Desire.laneChangeRight]
+      l_lane_change_prob = desire_state[log.LateralPlan.Desire.laneChangeLeft]
+      r_lane_change_prob = desire_state[log.LateralPlan.Desire.laneChangeRight]
       lane_change_prob = l_lane_change_prob + r_lane_change_prob
       DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob)
 

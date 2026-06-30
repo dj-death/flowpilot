@@ -146,37 +146,22 @@ def main(demo=False):
 
   config_realtime_process(7, 54)
 
-  # visionipc clients
-  while True:
-    available_streams = VisionIpcClient.available_streams("camerad", block=False)
-    if available_streams:
-      use_extra_client = VisionStreamType.VISION_STREAM_WIDE_ROAD in available_streams and VisionStreamType.VISION_STREAM_ROAD in available_streams
-      main_wide_camera = VisionStreamType.VISION_STREAM_ROAD not in available_streams
-      break
-    time.sleep(.1)
-
-  vipc_client_main_stream = VisionStreamType.VISION_STREAM_WIDE_ROAD if main_wide_camera else VisionStreamType.VISION_STREAM_ROAD
-  vipc_client_main = VisionIpcClient("camerad", vipc_client_main_stream, True)
-  vipc_client_extra = VisionIpcClient("camerad", VisionStreamType.VISION_STREAM_WIDE_ROAD, False)
-  cloudlog.warning(f"vision stream set up, main_wide_camera: {main_wide_camera}, use_extra_client: {use_extra_client}")
-
-  while not vipc_client_main.connect(False):
-    time.sleep(0.1)
-  while use_extra_client and not vipc_client_extra.connect(False):
-    time.sleep(0.1)
-
-  cloudlog.warning(f"connected main cam with buffer size: {vipc_client_main.buffer_len} ({vipc_client_main.width} x {vipc_client_main.height})")
-  if use_extra_client:
-    cloudlog.warning(f"connected extra cam with buffer size: {vipc_client_extra.buffer_len} ({vipc_client_extra.width} x {vipc_client_extra.height})")
-
+  # flowpilot frame subscribers (no VisionIPC)
+  import zmq
+  from cereal import messaging as fp_msg
+  frame_sub = messaging.SubMaster(["roadCameraState", "wideRoadCameraState"])
+  road_buf_sock = messaging.sub_sock("roadCameraBuffer", conflate=True)
+  wide_buf_sock = messaging.sub_sock("wideRoadCameraBuffer", conflate=True)
+  main_wide_camera = False
+  use_extra_client = True
+  CAM_W, CAM_H = 1920, 1080
   st = time.monotonic()
-  cloudlog.warning("loading model")
-  model = ModelState(vipc_client_main.width, vipc_client_main.height, USBGPU)
+  model = ModelState(CAM_W, CAM_H, USBGPU)
   cloudlog.warning(f"models loaded in {time.monotonic() - st:.1f}s, modeld starting")
 
   # messaging
   pm = PubMaster(["modelV2", "drivingModelData", "cameraOdometry"])
-  sm = SubMaster(["deviceState", "carState", "roadCameraState", "liveCalibration", "driverMonitoringState", "carControl", "liveDelay"])
+  sm = SubMaster(["carState", "liveCalibration", "carControl"])
 
   publish_state = PublishState()
   params = Params()
@@ -207,50 +192,28 @@ def main(demo=False):
 
   DH = DesireHelper()
 
+  from openpilot.selfdrive.modeld.flowpilot_frames import read_frame
   while True:
-    # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
-    while meta_main.timestamp_sof < meta_extra.timestamp_sof + 25000000:
-      buf_main = vipc_client_main.recv()
-      meta_main = FrameMeta(vipc_client_main)
-      if buf_main is None:
-        break
-
-    if buf_main is None:
-      cloudlog.debug("vipc_client_main no frame")
+    rb = messaging.recv_one_or_none(road_buf_sock)
+    wb = messaging.recv_one_or_none(wide_buf_sock)
+    frame_sub.update(0)
+    if rb is None or wb is None:
       continue
-
-    if use_extra_client:
-      # Keep receiving extra frames until frame id matches main camera
-      while True:
-        buf_extra = vipc_client_extra.recv()
-        meta_extra = FrameMeta(vipc_client_extra)
-        if buf_extra is None or meta_main.timestamp_sof < meta_extra.timestamp_sof + 25000000:
-          break
-
-      if buf_extra is None:
-        cloudlog.debug("vipc_client_extra no frame")
-        continue
-
-      if abs(meta_main.timestamp_sof - meta_extra.timestamp_sof) > 10000000:
-        cloudlog.error(f"frames out of sync! main: {meta_main.frame_id} ({meta_main.timestamp_sof / 1e9:.5f}),\
-                         extra: {meta_extra.frame_id} ({meta_extra.timestamp_sof / 1e9:.5f})")
-
-    else:
-      # Use single camera
-      buf_extra = buf_main
-      meta_extra = meta_main
+    buf_main  = read_frame(rb.roadCameraBuffer,     frame_sub["roadCameraState"])
+    buf_extra = read_frame(wb.wideRoadCameraBuffer, frame_sub["wideRoadCameraState"])
+    meta_main, meta_extra = buf_main, buf_extra   # FlowpilotBuf carries frame_id/timestamps
 
     sm.update(0)
     desire = DH.desire
-    is_rhd = sm["driverMonitoringState"].isRHD
-    frame_id = sm["roadCameraState"].frameId
+    is_rhd = False                                   # flowpilot has no compatible driverMonitoringState
+    frame_id = sm["roadCameraState"].frameId if sm.seen["roadCameraState"] else meta_main.frame_id
     v_ego = max(sm["carState"].vEgo, 0.)
-    lat_delay = sm["liveDelay"].lateralDelay + LAT_SMOOTH_SECONDS
-    if sm.updated["liveCalibration"] and sm.seen['roadCameraState'] and sm.seen['deviceState']:
-      device_from_calib_euler = np.array(sm["liveCalibration"].rpyCalib, dtype=np.float32)
-      dc = DEVICE_CAMERAS[(str(sm['deviceState'].deviceType), str(sm['roadCameraState'].sensor))]
-      model_transform_main = get_warp_matrix(device_from_calib_euler, dc.ecam.intrinsics if main_wide_camera else dc.fcam.intrinsics, False).astype(np.float32)
-      model_transform_extra = get_warp_matrix(device_from_calib_euler, dc.ecam.intrinsics, True).astype(np.float32)
+    lat_delay = 0.2 + LAT_SMOOTH_SECONDS             # flowpilot has no liveDelay service
+    if sm.updated["liveCalibration"]:
+      from openpilot.selfdrive.modeld.flowpilot_warp import warp_matrices
+      from openpilot.selfdrive.modeld.flowpilot_intrinsics import ROAD_INTRINSICS, WIDE_INTRINSICS
+      rpy = np.array(sm["liveCalibration"].rpyCalib, dtype=np.float32)
+      model_transform_main, model_transform_extra = warp_matrices(rpy, ROAD_INTRINSICS, WIDE_INTRINSICS)
       live_calib_seen = True
 
     traffic_convention = np.zeros(2)

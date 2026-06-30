@@ -83,6 +83,24 @@ def get_warp_matrix(rpy_calib, wide_cam=False, big_model=False, tici=True):
   return warp_matrix
 
 
+### Like get_warp_matrix, but takes the camera intrinsics explicitly instead of
+### selecting them by camera type. Matches upstream v0.11 modeld's
+### get_warp_matrix(device_from_calib_euler, intrinsics, bigmodel_frame).
+### Used by the tinygrad modeld stack (selfdrive/modeld/flowpilot_warp.py) so the
+### warp uses flowpilot's actual runtime cam_intrinsics.
+def get_warp_matrix_intrinsics(rpy_calib, intrinsics, big_model=False):
+  from common.transformations.orientation import rot_from_euler
+  from common.transformations.camera import view_frame_from_device_frame
+  intrinsics = np.asarray(intrinsics, dtype=np.float64)
+  if big_model:
+    calib_from_model = np.linalg.inv(sbigmodel_frame_from_calib_frame[:, (0, 1, 2)])
+  else:
+    calib_from_model = np.linalg.inv(medmodel_frame_from_calib_frame[:, (0, 1, 2)])
+  device_from_calib = rot_from_euler(rpy_calib)
+  camera_from_calib = intrinsics.dot(view_frame_from_device_frame.dot(device_from_calib))
+  return camera_from_calib.dot(calib_from_model)
+
+
 ### This is old, just for debugging
 def get_warp_matrix_old(rpy_calib, wide_cam=False, big_model=False, tici=True):
   from common.transformations.orientation import rot_from_euler

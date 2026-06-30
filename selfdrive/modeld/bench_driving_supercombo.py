@@ -5,7 +5,7 @@ from selfdrive.modeld.compile_modeld import make_input_queues, WARP_INPUTS, POLI
 from system.camerad.cameras.nv12_info import get_nv12_info
 
 CAM_W, CAM_H = 1920, 1080
-PKL = "selfdrive/assets/models/driving/driving_tinygrad.pkl"
+PKL = "selfdrive/modeld/models/driving_tinygrad.pkl"
 
 def main(n=100):
     d = pickle.load(open(PKL, "rb"))

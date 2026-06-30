@@ -4,7 +4,7 @@ from selfdrive.modeld.parse_model_outputs import Parser
 from selfdrive.modeld.constants import ModelConstants
 
 ONNX = "selfdrive/assets/models/driving/driving_supercombo.onnx"
-PKL  = "selfdrive/assets/models/driving/driving_tinygrad.pkl"
+PKL  = "selfdrive/modeld/models/driving_tinygrad.pkl"
 
 def test_parse_shapes():
     md = pickle.load(open(PKL, "rb"))["metadata"]

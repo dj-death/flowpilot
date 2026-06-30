@@ -12,13 +12,15 @@ def main(n=100):
     md, run_policy, warp = d["metadata"], d["run_policy"], d[(CAM_W, CAM_H)]
     iq, npy = make_input_queues(md["input_shapes"], 4, device=None)
     yuv_size = get_nv12_info(CAM_W, CAM_H)[3]
+    # road and wide must be distinct buffers; the JIT rejects the same buffer for two inputs
     frame = Tensor(np.zeros(yuv_size, dtype=np.uint8)).realize()
+    big_frame = Tensor(np.zeros(yuv_size, dtype=np.uint8)).realize()
     ts = []
     for i in range(n):
         npy["tfm"][:] = np.eye(3, dtype=np.float32)
         npy["big_tfm"][:] = np.eye(3, dtype=np.float32)
         t0 = time.perf_counter()
-        warped = warp(**{k: iq[k] for k in WARP_INPUTS}, frame=frame, big_frame=frame)
+        warped = warp(**{k: iq[k] for k in WARP_INPUTS}, frame=frame, big_frame=big_frame)
         outs, = run_policy(**{k: iq[k] for k in POLICY_INPUTS if k in iq}, warped=warped)
         _ = outs.numpy()
         ts.append(time.perf_counter() - t0)

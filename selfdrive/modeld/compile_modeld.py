@@ -14,7 +14,13 @@ import numpy as np
 def _patch_tinygrad_fetch_fw():
   import hashlib
   import pathlib
-  import zstandard
+  try:
+    import zstandard
+  except ImportError:
+    # The .zst fast-path only serves GPU firmware blobs (AMD/QCOM). On hosts
+    # without zstandard (e.g. Termux CPU/OpenCL builds) skip the patch; tinygrad's
+    # original fetch_fw still works for any backend that actually needs firmware.
+    return
   from tinygrad import helpers
   _orig = helpers.fetch_fw
   def fetch_fw(path, name, sha256):

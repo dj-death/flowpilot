@@ -1,3 +1,5 @@
+import os
+
 from cereal import car
 from common.params import Params
 from selfdrive.manager.process import ManagerProcess
@@ -22,7 +24,8 @@ procs = [
   ManagerProcess("plannerd", "plannerd"),
   ManagerProcess("radard", "radard"),
   ManagerProcess("calibrationd", "calibrationd"),
-  ManagerProcess("modelparsed", "./selfdrive/modeld/modelparsed", enabled=useModelParseD()),
+  ManagerProcess("modelparsed", "./selfdrive/modeld/modelparsed", enabled=useModelParseD() and os.getenv("MODELD_TG") != "1"),
+  ManagerProcess("modeld", "python3", args=["-m", "selfdrive.modeld.modeld_flowpilot"], enabled=os.getenv("MODELD_TG") == "1"),
   ManagerProcess("clocksd", "./system/clocksd/clocksd"),
   ManagerProcess("proclogd", "./system/proclogd/proclogd"),
   ManagerProcess("logmessaged", "logmessaged", offroad=True),

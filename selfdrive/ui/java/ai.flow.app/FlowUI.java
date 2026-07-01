@@ -58,7 +58,7 @@ public class FlowUI extends Game {
             @Override
             public void run() {
                 while (!Thread.interrupted()){
-                    isOnRoad = params.existsAndCompare("IsOnroad", true);
+                    isOnRoad = true; // force always-onroad (was: params.existsAndCompare("IsOnroad", true))
                     try {
                         Thread.sleep(50);
                     } catch (InterruptedException e) {

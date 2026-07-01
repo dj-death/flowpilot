@@ -591,8 +591,13 @@ public class OnRoadScreen extends ScreenAdapter {
 
     public void updateModelOutputs(){
         Definitions.Event.Reader event = sh.recv(modelTopic);
-        Definitions.LateralPlan.Reader latPlan = sh.recv("lateralPlan").getLateralPlan();
-        PrimitiveList.Float.Reader pathpoints = latPlan.getDPathPoints();
+        // lateralPlan is published by the planner backend. ZMQSubHandler.recv() is a BLOCKING
+        // recv, so when the planner isn't running (external/standalone modeld) an unconditional
+        // recv here hangs the GL render thread forever -> frozen UI. Only consume it when a
+        // message is actually queued; otherwise fall back to the model's own predicted path.
+        PrimitiveList.Float.Reader pathpoints = null;
+        if (sh.updated("lateralPlan"))
+            pathpoints = sh.recv("lateralPlan").getLateralPlan().getDPathPoints();
         MsgModelDataV2.fillParsed(parsed, event.getModelV2(), true);
 
         try (MemoryWorkspace ws = Nd4j.getWorkspaceManager().getAndActivateWorkspace(wsConfig, "DrawUI")) {
@@ -601,7 +606,8 @@ public class OnRoadScreen extends ScreenAdapter {
             Rt = Preprocess.eulerAnglesToRotationMatrix(-augmentRot.getFloat(0, 1), -augmentRot.getFloat(0, 2), -augmentRot.getFloat(0, 0), 0.0, false);
             RtPath = Preprocess.eulerAnglesToRotationMatrix(-augmentRot.getFloat(0, 1), -augmentRot.getFloat(0, 2), -augmentRot.getFloat(0, 0), 1.28, false);
             for (int i = 0; i< CommonModelF3.TRAJECTORY_SIZE; i++) {
-                parsed.position.get(1)[i] = pathpoints.get(i);
+                if (pathpoints != null)
+                    parsed.position.get(1)[i] = pathpoints.get(i);
                 parsed.position.get(0)[i] = Math.max(parsed.position.get(0)[i], minZ);
                 parsed.roadEdges.get(0).get(0)[i] = Math.max(parsed.roadEdges.get(0).get(0)[i], minZ);
                 parsed.roadEdges.get(1).get(0)[i] = Math.max(parsed.roadEdges.get(1).get(0)[i], minZ);

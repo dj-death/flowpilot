@@ -5,9 +5,12 @@ import static ai.flow.common.utils.getBoolEnvVar;
 public abstract class ParamsInterface {
 
     public static ParamsInterface getInstance() {
-        if (getBoolEnvVar("USE_PARAMS_NATIVE"))
-            return new Params();
-        return new ParamsClient();
+        // Default to the native (local) param store so the app runs without a ZMQ params server.
+        // This is the same on-disk store the external Python modeld uses. Opt into the ZMQ
+        // client (shared params server backend) with USE_PARAMS_CLIENT=1.
+        if (getBoolEnvVar("USE_PARAMS_CLIENT"))
+            return new ParamsClient();
+        return new Params();
     }
 
     public void putInt(String key, int value){}

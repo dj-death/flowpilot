@@ -13,10 +13,10 @@ public class utils {
         SNPE, // Nicki Minaj Model
         TNN, // DOESNT WORK
         THNEED, // Latest
-        EXTERNAL_TINYGRAD // DOESNT WORK
+        EXTERNAL_TINYGRAD // defer to the external Python tinygrad modeld (driving_supercombo)
     }
     public static boolean F2 = false, NLPModel = false, LAModel = true;
-    public static USE_MODEL_RUNNER Runner = USE_MODEL_RUNNER.THNEED;
+    public static USE_MODEL_RUNNER Runner = USE_MODEL_RUNNER.EXTERNAL_TINYGRAD;
     public static boolean getBoolEnvVar(String key) {
         String val = System.getenv(key);
         boolean ret = false;

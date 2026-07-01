@@ -121,7 +121,14 @@ public class LoadingActivity extends AppCompatActivity {
         intent.putExtra(TermuxConstants.TERMUX_APP.RUN_COMMAND_SERVICE.EXTRA_BACKGROUND, true);
         intent.putExtra(TermuxConstants.TERMUX_APP.RUN_COMMAND_SERVICE.EXTRA_SESSION_ACTION, "0");
         intent.putExtra(TermuxConstants.TERMUX_APP.RUN_COMMAND_SERVICE.EXTRA_COMMAND_LABEL, "boot flowpilot");
-        startService(intent);
+        try {
+            startService(intent);
+        } catch (Exception e) {
+            // Android 12+ blocks starting the Termux RUN_COMMAND service from the background, and
+            // Termux may not allow external apps. Non-fatal: the Python backend/modeld is launched
+            // out-of-band (e.g. as a rooted co-process), so let the UI continue instead of crashing.
+            android.util.Log.w("flowpilot", "bootTermux: could not start Termux backend: " + e);
+        }
     }
 
     private void requestPermissions() {

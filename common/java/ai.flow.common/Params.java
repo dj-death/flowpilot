@@ -22,6 +22,8 @@ public class Params extends ParamsInterface {
             return;
         env = new Env();
         String home = System.getenv("HOME");
+        if (home == null || home.isEmpty())
+            home = "/data/data/ai.flow.android/files"; // Android app has no HOME env; use its data dir
         String dbPath = home + "/.flowdrive/params";
         new File(dbPath).mkdirs();
         env.setMapSize(1024*1024*1024);
@@ -75,40 +77,47 @@ public class Params extends ParamsInterface {
     }
 
     public int getInt(String key){
-        byte[] byteKey = bytes(key);
-        return ByteBuffer.wrap(db.get(byteKey)).order(ByteOrder.LITTLE_ENDIAN).getInt();
+        byte[] value = db.get(bytes(key));
+        if (value == null) return 0;
+        return ByteBuffer.wrap(value).order(ByteOrder.LITTLE_ENDIAN).getInt();
     }
 
     public float getFloat(String key){
-        byte[] byteKey = bytes(key);
         try (Transaction tx = env.createReadTransaction()) {
-            return ByteBuffer.wrap(db.get(tx, byteKey)).order(ByteOrder.LITTLE_ENDIAN).getFloat();
+            byte[] value = db.get(tx, bytes(key));
+            if (value == null) return 0;
+            return ByteBuffer.wrap(value).order(ByteOrder.LITTLE_ENDIAN).getFloat();
         }
     }
 
     public short getShort(String key){
-        byte[] byteKey = bytes(key);
-        return ByteBuffer.wrap(db.get(byteKey)).order(ByteOrder.LITTLE_ENDIAN).getShort();
+        byte[] value = db.get(bytes(key));
+        if (value == null) return 0;
+        return ByteBuffer.wrap(value).order(ByteOrder.LITTLE_ENDIAN).getShort();
     }
 
     public long getLong(String key){
-        byte[] byteKey = bytes(key);
-        return ByteBuffer.wrap(db.get(byteKey)).order(ByteOrder.LITTLE_ENDIAN).getLong();
+        byte[] value = db.get(bytes(key));
+        if (value == null) return 0;
+        return ByteBuffer.wrap(value).order(ByteOrder.LITTLE_ENDIAN).getLong();
     }
 
     public double getDouble(String key){
-        byte[] byteKey = bytes(key);
-        return ByteBuffer.wrap(db.get(byteKey)).order(ByteOrder.LITTLE_ENDIAN).getDouble();
+        byte[] value = db.get(bytes(key));
+        if (value == null) return 0;
+        return ByteBuffer.wrap(value).order(ByteOrder.LITTLE_ENDIAN).getDouble();
     }
 
     public String getString(String key){
-        byte[] byteKey = bytes(key);
-        return new String(db.get(byteKey));
+        byte[] value = db.get(bytes(key));
+        if (value == null) return ""; // missing key -> empty string (avoid NPEs on .equals/.length)
+        return new String(value);
     }
 
     public boolean getBool(String key){
-        byte[] byteKey = bytes(key);
-        return new String(db.get(byteKey)).equals("1");
+        byte[] value = db.get(bytes(key));
+        if (value == null) return false;
+        return new String(value).equals("1");
     }
 
     public void deleteKey(String key){
@@ -134,7 +143,8 @@ public class Params extends ParamsInterface {
     }
 
     public void dispose(){
-        db.close();
-        env.close();
+        // env/db are process-wide statics shared by every Params instance; individual screens call
+        // dispose() on their own instances, so closing here would free the shared handles out from
+        // under the others ("Native object has been freed"). Keep them open for the process lifetime.
     }
 }

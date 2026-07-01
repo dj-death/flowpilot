@@ -150,8 +150,9 @@ def main(demo=False):
   DH = DesireHelper()
 
   from selfdrive.modeld.flowpilot_frames import read_frame
-  # recv_one_or_none is non-blocking + conflate, so road/wide buffers usually arrive on
-  # different loop iterations; latch each until its pair is available, then consume both.
+  # recv_one_or_none is non-blocking + conflate, so buffers arrive on different loop iterations;
+  # latch each until consumed. flowpilot devices with a single (road-only) camera never publish
+  # the wide buffer, so process on the road frame and reuse it for the wide input.
   last_rb, last_wb = None, None
   while True:
     rb = messaging.recv_one_or_none(road_buf_sock)
@@ -159,11 +160,15 @@ def main(demo=False):
     if rb is not None: last_rb = rb
     if wb is not None: last_wb = wb
     frame_sub.update(0)
-    if last_rb is None or last_wb is None:
+    if last_rb is None:
       continue
-    rb, wb, last_rb, last_wb = last_rb, last_wb, None, None
-    buf_main  = read_frame(rb.roadCameraBuffer,     frame_sub["roadCameraState"])
-    buf_extra = read_frame(wb.wideRoadCameraBuffer, frame_sub["wideRoadCameraState"])
+    rb, last_rb = last_rb, None
+    wb, last_wb = last_wb, None
+    buf_main = read_frame(rb.roadCameraBuffer, frame_sub["roadCameraState"])
+    if wb is not None:
+      buf_extra = read_frame(wb.wideRoadCameraBuffer, frame_sub["wideRoadCameraState"])
+    else:
+      buf_extra = read_frame(rb.roadCameraBuffer, frame_sub["roadCameraState"])  # single-camera: reuse road
     meta_main, meta_extra = buf_main, buf_extra   # FlowpilotBuf carries frame_id/timestamps
 
     sm.update(0)

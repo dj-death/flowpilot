@@ -37,6 +37,7 @@ public class SettingsScreen extends ScreenAdapter {
             buttonVehicles, buttonOBD;
     ImageButton closeButton;
     SelectBox<String> carBrandSelectBox;
+    SelectBox<String> voiceLangSelectBox;
     SpriteBatch batch;
     Table rootTable, settingTable, scrollTable, currentSettingTable;
     Texture lineTex = Utils.getLineTexture(700, 1, Color.WHITE);
@@ -114,6 +115,19 @@ public class SettingsScreen extends ScreenAdapter {
         for (int i=0; i<ToggleButtons.size(); i++) {
             addKeyValueTable(currentSettingTable, AdditionalToggles.get(i*2), ToggleButtons.get(i), true);
         }
+        addKeyValueTable(currentSettingTable, "Voice Language", voiceLangSelectBox, true);
+    }
+
+    private static String voiceLangCode(String display){
+        if ("Français".equals(display)) return "fr";
+        if ("Arabic".equals(display)) return "ar";
+        return "en";
+    }
+
+    private static String voiceLangDisplay(String code){
+        if ("fr".equals(code)) return "Français";
+        if ("ar".equals(code)) return "Arabic";
+        return "English";
     }
 
     public void fillVehiclesSettings(){
@@ -140,6 +154,8 @@ public class SettingsScreen extends ScreenAdapter {
         AdditionalToggles.add("SensitiveSlow");
         AdditionalToggles.add("Always Use Model Path");
         AdditionalToggles.add("UseModelPath");
+        AdditionalToggles.add("Spoken Advisories");
+        AdditionalToggles.add("SpokenAdvisories");
         // ELM327 Bluetooth OBD-II adapter: read-only diagnostics ONLY. Enabling this does
         // NOT enable driving features (no steering/gas/brake, no engagement) - it forces
         // openpilot into read-only mode. See OBDDiagnosticScreen for details/warning.
@@ -345,6 +361,18 @@ public class SettingsScreen extends ScreenAdapter {
                 if(null != selectedBrand && !selectedBrand.equals("--Select Cars--")){
                     params.put("Mycar", selectedBrand);
                 }
+            }
+        });
+
+        // Voice language for the spoken advisories (display label -> code stored in VoiceLang).
+        voiceLangSelectBox = new SelectBox<>(appContext.skin);
+        voiceLangSelectBox.setItems("English", "Français", "Arabic");
+        String vl = params.exists("VoiceLang") ? params.getString("VoiceLang") : "en";
+        voiceLangSelectBox.setSelected(voiceLangDisplay(vl));
+        voiceLangSelectBox.addListener(new ChangeListener(){
+            @Override
+            public void changed(ChangeListener.ChangeEvent event, Actor actor) {
+                params.put("VoiceLang", voiceLangCode(voiceLangSelectBox.getSelected()));
             }
         });
 

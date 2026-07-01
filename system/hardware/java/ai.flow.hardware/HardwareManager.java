@@ -9,4 +9,6 @@ public abstract class HardwareManager {
     // without TTS. Used by the ELM327 advisory mode to announce the driving actions
     // openpilot would take when it cannot control the car.
     public void announce(String text){}
+    // Set the spoken-advisory voice language ("en"/"fr"/"ar"). No-op on platforms without TTS.
+    public void setVoiceLanguage(String lang){}
 ;}

@@ -11,6 +11,7 @@ public class AndroidHardwareManager extends HardwareManager {
     public Window window;
     private TextToSpeech tts;
     private volatile boolean ttsReady = false;
+    private volatile String desiredLang = "en";   // "en" | "fr" | "ar", from the VoiceLang setting
 
     public AndroidHardwareManager(Window window){
         this.window = window;
@@ -39,12 +40,36 @@ public class AndroidHardwareManager extends HardwareManager {
         try {
             tts = new TextToSpeech(window.getContext().getApplicationContext(), status -> {
                 if (status == TextToSpeech.SUCCESS) {
-                    tts.setLanguage(Locale.US);
                     ttsReady = true;
+                    applyLanguage();
                 }
             });
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    // Set the spoken-advisory voice language from the "VoiceLang" setting ("en"/"fr"/"ar").
+    @Override
+    public void setVoiceLanguage(String lang){
+        desiredLang = (lang == null || lang.isEmpty()) ? "en" : lang;
+        if (ttsReady)
+            applyLanguage();
+    }
+
+    private void applyLanguage(){
+        if (tts == null)
+            return;
+        int r = tts.setLanguage(localeFor(desiredLang));
+        if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED)
+            tts.setLanguage(Locale.US); // requested voice isn't installed on this device
+    }
+
+    private static Locale localeFor(String lang){
+        switch (lang) {
+            case "fr": return Locale.FRENCH;
+            case "ar": return new Locale("ar");
+            default:   return Locale.US;
         }
     }
 }

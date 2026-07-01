@@ -133,9 +133,11 @@ public class OnRoadScreen extends ScreenAdapter {
     // ELM327 advisory mode: gates the ELM327-only debug feed / "System Unresponsive" banner.
     // Set once from the UseELM327 param.
     boolean advisoryMode = false;
-    // Spoken advisory cues (lead/lane/curve, from the camera model) now run independently of
-    // ELM327: on unless explicitly disabled via the "SpokenAdvisories" param.
+    // Spoken advisory cues (lead/lane/curve, from the camera model) run independently of ELM327,
+    // controlled by the "SpokenAdvisories" Settings toggle (seeded on).
     boolean spokenAdvisories = false;
+    // Advisory phrases, localized from the "VoiceLang" setting (en/fr/ar).
+    String cueVehicleAhead, cueDriftLeft, cueDriftRight, cueCurveLeft, cueCurveRight;
     long lastLeadAdvisoryMs = 0;
     long lastLaneDepartureMs = 0;
     long lastCurveAdvisoryMs = 0;
@@ -439,7 +441,8 @@ public class OnRoadScreen extends ScreenAdapter {
         velocityUnitLabel.setColor(0.5f, 1f, 0.5f, 1f);
         isMetric = true; // force metric (km/h) (was: params.existsAndCompare("IsMetric", true))
         advisoryMode = params.getBool("UseELM327");
-        spokenAdvisories = !params.existsAndCompare("SpokenAdvisories", false); // on unless disabled
+        spokenAdvisories = params.getBool("SpokenAdvisories"); // Settings toggle (seeded true on first run)
+        loadAdvisoryPhrases(params.getString("VoiceLang"));    // localize cues + pick the TTS voice
 
         // Start blank: with no control backend there is nothing to announce. drawAlert() fills
         // these when a backend (a panda/car, or controlsd in ELM327 advisory mode) publishes.
@@ -668,7 +671,7 @@ public class OnRoadScreen extends ScreenAdapter {
 
         if (distM < 12.0f || (moving && headwaySec < 1.4f)) {
             if (now - lastLeadAdvisoryMs > 5000) {
-                appContext.hardwareManager.announce("Vehicle ahead, slow down");
+                appContext.hardwareManager.announce(cueVehicleAhead);
                 lastLeadAdvisoryMs = now;
             }
         }
@@ -687,9 +690,9 @@ public class OnRoadScreen extends ScreenAdapter {
 
         String drift = null;
         if (parsed.laneLineProbs[1] > 0.5f && distToLeft < LANE_DEPARTURE_DIST_M)
-            drift = "Lane departure, drifting left";
+            drift = cueDriftLeft;
         else if (parsed.laneLineProbs[2] > 0.5f && distToRight < LANE_DEPARTURE_DIST_M)
-            drift = "Lane departure, drifting right";
+            drift = cueDriftRight;
 
         if (drift != null && now - lastLaneDepartureMs > 4000) {
             appContext.hardwareManager.announce(drift);
@@ -706,9 +709,40 @@ public class OnRoadScreen extends ScreenAdapter {
 
         float futureYaw = yaw[CURVE_LOOKAHEAD_IDX];
         if (Math.abs(futureYaw) > CURVE_YAW_RAD && now - lastCurveAdvisoryMs > 6000) {
-            appContext.hardwareManager.announce(futureYaw > 0 ? "Curve ahead on the left" : "Curve ahead on the right");
+            appContext.hardwareManager.announce(futureYaw > 0 ? cueCurveLeft : cueCurveRight);
             lastCurveAdvisoryMs = now;
         }
+    }
+
+    // Localize the spoken advisory phrases and set the TTS voice for the chosen language
+    // (en default, fr, ar). Unknown/empty falls back to English.
+    private void loadAdvisoryPhrases(String lang) {
+        if (lang == null || lang.isEmpty())
+            lang = "en";
+        switch (lang) {
+            case "fr":
+                cueVehicleAhead = "Véhicule devant, ralentissez";
+                cueDriftLeft    = "Sortie de voie à gauche";
+                cueDriftRight   = "Sortie de voie à droite";
+                cueCurveLeft    = "Virage à gauche";
+                cueCurveRight   = "Virage à droite";
+                break;
+            case "ar":
+                cueVehicleAhead = "مركبة أمامك، خفّف السرعة";
+                cueDriftLeft    = "انحراف عن المسار إلى اليسار";
+                cueDriftRight   = "انحراف عن المسار إلى اليمين";
+                cueCurveLeft    = "منعطف إلى اليسار";
+                cueCurveRight   = "منعطف إلى اليمين";
+                break;
+            default:
+                cueVehicleAhead = "Vehicle ahead, slow down";
+                cueDriftLeft    = "Lane departure, drifting left";
+                cueDriftRight   = "Lane departure, drifting right";
+                cueCurveLeft    = "Curve ahead on the left";
+                cueCurveRight   = "Curve ahead on the right";
+                break;
+        }
+        appContext.hardwareManager.setVoiceLanguage(lang);
     }
 
     public void handleSounds(Definitions.ControlsState.Reader controlState, AudibleAlert alert){

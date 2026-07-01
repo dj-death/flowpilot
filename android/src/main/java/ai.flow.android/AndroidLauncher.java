@@ -121,6 +121,10 @@ public class AndroidLauncher extends FragmentActivity implements AndroidFragment
 
 		params = ParamsInterface.getInstance();
 
+		// Seed spoken-advisory defaults on first run so the Settings toggle/selector match behaviour.
+		if (!params.exists("SpokenAdvisories")) params.putBool("SpokenAdvisories", true);
+		if (!params.exists("VoiceLang")) params.put("VoiceLang", "en");
+
 		TelephonyManager telephonyManager = (TelephonyManager)getSystemService(Context.TELEPHONY_SERVICE);
 		String dongleID = "";
 		if (telephonyManager != null) {

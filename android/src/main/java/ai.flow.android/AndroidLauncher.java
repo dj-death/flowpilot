@@ -2,6 +2,7 @@ package ai.flow.android;
 
 import ai.flow.android.sensor.CameraManager;
 import ai.flow.android.sensor.ELM327Manager;
+import ai.flow.android.sensor.GpsManager;
 import ai.flow.android.sensor.SensorManager;
 import ai.flow.android.vision.ONNXModelRunner;
 import ai.flow.android.vision.SNPEModelRunner;
@@ -144,6 +145,14 @@ public class AndroidLauncher extends FragmentActivity implements AndroidFragment
 			requestBluetoothPermission();
 			new ELM327Manager(appContext).start();
 		}
+
+		// Speed estimate: with no OBD/panda there is no vehicle speed, so estimate it from the
+		// model's predicted ego-velocity fused with GPS ground speed (see OnRoadScreen /
+		// GpsManager). GPS is display-only and never feeds the control path.
+		if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED)
+			requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION,
+					Manifest.permission.ACCESS_COARSE_LOCATION}, 1002);
+		new GpsManager(appContext).start();
 
 		AndroidApplicationConfiguration configuration = new AndroidApplicationConfiguration();
 		CameraManager cameraManager, cameraManagerWide = null;

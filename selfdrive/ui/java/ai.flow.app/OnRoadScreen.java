@@ -3,6 +3,7 @@ package ai.flow.app;
 import ai.flow.app.helpers.GifDecoder;
 import ai.flow.app.helpers.Utils;
 import ai.flow.common.OBDData;
+import ai.flow.common.SpeedData;
 import ai.flow.common.ParamsInterface;
 import ai.flow.common.Path;
 import ai.flow.common.transformations.Camera;
@@ -125,13 +126,16 @@ public class OnRoadScreen extends ScreenAdapter {
 
     Label velocityLabel, velocityUnitLabel, alertText1, alertText2, maxCruiseSpeedLabel, dateLabel, vesrionLabel;
     Table velocityTable, maxCruiseTable, alertTable, infoTable, offRoadTable, rootTable, offRoadRootTable;
-    Stack statusLabelTemp, statusLabelCan, statusLabelOnline, maxCruise;
+    Stack statusLabelTemp, maxCruise;
     ScrollPane notificationScrollPane;
     ImageButton settingsButton;
     ParsedOutputs parsed = new ParsedOutputs();
-    // ELM327 advisory mode: openpilot can't control the car, so spoken cues are
-    // announced instead. Set once from the UseELM327 param.
+    // ELM327 advisory mode: gates the ELM327-only debug feed / "System Unresponsive" banner.
+    // Set once from the UseELM327 param.
     boolean advisoryMode = false;
+    // Spoken advisory cues (lead/lane/curve, from the camera model) now run independently of
+    // ELM327: on unless explicitly disabled via the "SpokenAdvisories" param.
+    boolean spokenAdvisories = false;
     long lastLeadAdvisoryMs = 0;
     long lastLaneDepartureMs = 0;
     long lastCurveAdvisoryMs = 0;
@@ -139,9 +143,12 @@ public class OnRoadScreen extends ScreenAdapter {
     static final float LANE_DEPARTURE_DIST_M = 1.0f;     // warn when an ego lane line is closer than this
     static final float CURVE_YAW_RAD = 0.15f;            // ~8.6 deg predicted heading change => curve
     static final int CURVE_LOOKAHEAD_IDX = 20;           // trajectory index (~2-3 s ahead)
-    int canErrCount = 0;
-    int canErrCountPrev = 0;
-    int canMisses = 0;
+    // Speed shown when there is no OBD/vehicle speed: the model's predicted ego-velocity
+    // (fast, smooth) fused with GPS ground speed (absolute). See ai.flow.common.SpeedData
+    // + GpsManager. Touched on the render/model thread only.
+    float estSpeedMps = 0f;          // fused, smoothed estimate (m/s)
+    float modelGpsScale = 1.0f;      // model->GPS scale correction, learned while GPS is present
+    long lastCarStateMs = 0;         // last time real carState speed arrived
     float uiWidth = 1280;
     float uiHeight = 640;
     int notificationWidth = 950;
@@ -338,7 +345,11 @@ public class OnRoadScreen extends ScreenAdapter {
     public OnRoadScreen(FlowUI appContext) {
         this.appContext = appContext;
 
-        PrepareDebugReader();
+        // The UDP-9000 debug feed only exists when a control/planner backend is running, which
+        // in this build only happens in ELM327 advisory mode. Skip the reader thread + socket
+        // otherwise, so a missing heartbeat can't raise a false "System Unresponsive!".
+        if (params.getBool("UseELM327"))
+            PrepareDebugReader();
 
         soundAlerts = new HashMap<AudibleAlert, Sound>() {{
             put(AudibleAlert.ENGAGE, appContext.engageSound);
@@ -426,11 +437,14 @@ public class OnRoadScreen extends ScreenAdapter {
         velocityLabel.setColor(0.5f, 1f, 0.5f, 1f);
         velocityUnitLabel = new Label("", appContext.skin, "default-font", "white");
         velocityUnitLabel.setColor(0.5f, 1f, 0.5f, 1f);
-        isMetric = params.existsAndCompare("IsMetric", true);
+        isMetric = true; // force metric (km/h) (was: params.existsAndCompare("IsMetric", true))
         advisoryMode = params.getBool("UseELM327");
+        spokenAdvisories = !params.existsAndCompare("SpokenAdvisories", false); // on unless disabled
 
-        alertText1 = new Label("Flowpilot Unavailable", appContext.skin, "default-font-bold-med", "white");
-        alertText2 = new Label("Waiting for controls to start", appContext.skin, "default-font", "white");
+        // Start blank: with no control backend there is nothing to announce. drawAlert() fills
+        // these when a backend (a panda/car, or controlsd in ELM327 advisory mode) publishes.
+        alertText1 = new Label("", appContext.skin, "default-font-bold-med", "white");
+        alertText2 = new Label("", appContext.skin, "default-font", "white");
 
         texImage = new Image(texture);
 
@@ -459,14 +473,9 @@ public class OnRoadScreen extends ScreenAdapter {
         updateStatusLabel(statusLabelTemp, StatusColors.colorStatusGood);
         infoTable.add(statusLabelTemp).align(Align.top).height(uiHeight/8f).width(settingsBarWidth*0.8f).padTop(60);
         infoTable.row();
-        statusLabelCan = getStatusLabel("CAN\nOFFLINE");
-        updateStatusLabel(statusLabelCan, StatusColors.colorStatusCritical);
-        infoTable.add(statusLabelCan).align(Align.top).height(uiHeight/8f).width(settingsBarWidth*0.8f).padTop(20);
-        infoTable.row();
-        statusLabelOnline = getStatusLabel("FLICKS\nOFFLINE");
-        updateStatusLabel(statusLabelOnline, StatusColors.colorStatusWarn);
-        infoTable.add(statusLabelOnline).align(Align.top).height(uiHeight/8f).width(settingsBarWidth*0.8f).padTop(20);
-        infoTable.row();
+        // CAN / FLICKS status tiles removed: this build runs no panda/comma device, so there is
+        // never a control CAN to report and no online-status feed -- those tiles were permanently,
+        // falsely "OFFLINE".
         Image logoTexture = new Image(loadTextureMipMap("selfdrive/assets/icons/circle-white.png"));
         logoTexture.setColor(1, 215/255f, 0, 0.6f);
         infoTable.add(logoTexture).align(Align.top).size(110).padTop(35).padBottom(40);
@@ -528,8 +537,9 @@ public class OnRoadScreen extends ScreenAdapter {
     }
 
     public void setDefaultAlert(){
-        alertText1.setText("Flowpilot Unavailable");
-        alertText2.setText("Waiting for controls to start");
+        // No phantom "waiting for controls" banner in a device-less build.
+        alertText1.setText("");
+        alertText2.setText("");
     }
 
     @Override
@@ -567,26 +577,18 @@ public class OnRoadScreen extends ScreenAdapter {
     public static float LatestvEgo;
 
     public void updateCarState() {
+        // Only record the real vehicle speed + arrival time here; refreshSpeed() decides what
+        // the HUD shows (real carState/OBD speed, or the model+GPS estimate when neither exists).
         Definitions.Event.Reader event = sh.recv(carStateTopic);
         LatestvEgo = event.getCarState().getVEgo();
-        float vel = isMetric ? LatestvEgo * 3.6f : LatestvEgo * 2.237f;
-        velocityLabel.setText(Integer.toString((int)vel));
+        lastCarStateMs = System.currentTimeMillis();
     }
 
     public void updateControls() {
+        // controlsState is only published by a control backend (a panda/car, or controlsd in
+        // ELM327 advisory mode). We keep it purely to drive alerts and spoken advisory cues;
+        // there is no panda CAN-bus health to report in this build.
         controlState = sh.recv(controlsStateTopic).getControlsState();
-        canErrCount = controlState.getCanErrorCounter();
-
-        if (canErrCount != canErrCountPrev) {
-            canMisses++;
-            if (canMisses > 20)
-                updateStatusLabel(statusLabelCan, "CAN\nOFFLINE", StatusColors.colorStatusCritical);
-        }
-        else{
-            updateStatusLabel(statusLabelCan, "CAN\nONLINE", StatusColors.colorStatusGood);
-            canMisses = 0;
-        }
-        canErrCountPrev = canErrCount;
     }
 
     public void updateModelOutputs(){
@@ -599,6 +601,7 @@ public class OnRoadScreen extends ScreenAdapter {
         if (sh.updated("lateralPlan"))
             pathpoints = sh.recv("lateralPlan").getLateralPlan().getDPathPoints();
         MsgModelDataV2.fillParsed(parsed, event.getModelV2(), true);
+        updateSpeedEstimate(); // refresh the model+GPS speed estimate from parsed.velocity
 
         try (MemoryWorkspace ws = Nd4j.getWorkspaceManager().getAndActivateWorkspace(wsConfig, "DrawUI")) {
             INDArray RtPath;
@@ -625,19 +628,31 @@ public class OnRoadScreen extends ScreenAdapter {
             //lead3s = Draw.getTriangleCameraFrame(parsed.leads.get(2), K, Rt, leadDrawScale);
         }
 
-        if (advisoryMode)
+        if (spokenAdvisories)
             runAdvisory();
     }
 
-    // In ELM327 advisory mode openpilot cannot control the car, so it announces the actions
-    // it would take as spoken cues. These use the camera model output (always available
-    // without a panda) plus the ELM327 speed. Thresholds are conservative and may need
-    // on-road tuning; each cue is debounced so it speaks at most once every few seconds.
+    // Spoken advisory cues: openpilot can't control the car here, so it announces the actions
+    // it would take. They run from the camera model output plus the best available speed
+    // (carState / OBD / model+GPS estimate), so they work with NO ELM327/panda connected.
+    // Thresholds are conservative and may need on-road tuning; each cue is debounced so it
+    // speaks at most once every few seconds.
     private void runAdvisory() {
         long now = System.currentTimeMillis();
         runLeadAdvisory(now);
         runLaneDepartureAdvisory(now);
         runCurveAdvisory(now);
+    }
+
+    // Best available ego speed (m/s) for the advisory logic: real carState, else OBD speed,
+    // else the model+GPS estimate. This is what lets the spoken cues work with no ELM327/panda.
+    private float currentSpeedMps() {
+        long now = System.currentTimeMillis();
+        if (now - lastCarStateMs < 500)
+            return LatestvEgo;
+        if (OBDData.connected && !Float.isNaN(OBDData.speedKph) && (now - OBDData.lastUpdateMs) < 2000)
+            return OBDData.speedKph / 3.6f;
+        return estSpeedMps;
     }
 
     // Longitudinal: warn about a close lead vehicle (would-be braking).
@@ -647,7 +662,7 @@ public class OnRoadScreen extends ScreenAdapter {
             return;
 
         float distM = lead.x[0];                          // distance to lead, meters
-        float egoMs = OBDData.speedKph / 3.6f;            // our speed from the ELM327, m/s
+        float egoMs = currentSpeedMps();                  // best available ego speed, m/s
         boolean moving = !Float.isNaN(egoMs) && egoMs > 2.0f;
         float headwaySec = moving ? distM / egoMs : Float.MAX_VALUE;
 
@@ -662,8 +677,8 @@ public class OnRoadScreen extends ScreenAdapter {
     // Lateral: warn when the car drifts close to a high-confidence ego lane line (would-be
     // lane-keeping correction). Only active above ~30 km/h, like a normal lane-departure warning.
     private void runLaneDepartureAdvisory(long now) {
-        float egoMs = OBDData.speedKph / 3.6f;
-        if (Float.isNaN(egoMs) || egoMs < 8.3f)           // ~30 km/h
+        float egoMs = currentSpeedMps();
+        if (egoMs < 8.3f)                                 // ~30 km/h
             return;
 
         // laneLines: 0=far-left, 1=left ego, 2=right ego, 3=far-right; get(1)[] is lateral y.
@@ -751,6 +766,13 @@ public class OnRoadScreen extends ScreenAdapter {
             float maxVel = controlState.getVCruise();
             maxVel = isMetric ? maxVel * 3.6f : maxVel * 0.621371f;
             maxCruiseSpeedLabel.setText(Integer.toString(Math.round(maxVel)));
+            maxCruiseTable.setVisible(true);
+        } else {
+            // No control backend: show no phantom alert, and hide the cruise-setpoint tile
+            // rather than a permanent "MAX N/A".
+            alertText1.setText("");
+            alertText2.setText("");
+            maxCruiseTable.setVisible(false);
         }
 
         if (alertStatus==null || controlState==null) {
@@ -850,8 +872,61 @@ public class OnRoadScreen extends ScreenAdapter {
         Gdx.gl.glDisable(Gdx.gl.GL_BLEND);
     }
 
-    public void setUnits(){
-        velocityUnitLabel.setText("mph");
+    // Fuse the model's predicted ego-velocity (fast, smooth) with GPS ground speed (absolute)
+    // into one estimate, used when there is no real vehicle speed. GPS is authoritative when
+    // fresh; the model carries the estimate between GPS fixes and through dropouts, with a
+    // GPS-learned scale so the hand-off is seamless. Runs on the model/render thread.
+    public void updateSpeedEstimate(){
+        float modelSpeed = Math.max(0f, parsed.velocity.get(0)[0]); // forward m/s at t=0
+        long now = System.currentTimeMillis();
+        boolean gpsFresh = SpeedData.gpsHasFix && !Float.isNaN(SpeedData.gpsSpeedMps)
+                && (now - SpeedData.gpsLastMs) < 1500;
+        float target;
+        if (gpsFresh) {
+            target = SpeedData.gpsSpeedMps;                        // ground truth
+            if (SpeedData.gpsSpeedMps > 3f && modelSpeed > 1f) {   // learn hand-off scale
+                float inst = SpeedData.gpsSpeedMps / modelSpeed;
+                modelGpsScale += 0.05f * (inst - modelGpsScale);
+                modelGpsScale = Math.max(0.3f, Math.min(3.0f, modelGpsScale));
+            }
+        } else {
+            target = modelSpeed * modelGpsScale;                   // GPS gap -> model carries it
+        }
+        estSpeedMps += 0.3f * (target - estSpeedMps);              // EMA smoothing
+    }
+
+    // Resolve the speed to display and how to mark it, each frame. Priority: real vehicle speed
+    // (carState) -> OBD speed (ELM327 connected) -> model+GPS estimate. Only the estimate is
+    // tinted differently and tagged "est".
+    public void refreshSpeed(){
+        long now = System.currentTimeMillis();
+        float speedMps;
+        boolean estimate;
+        if (now - lastCarStateMs < 500) {                  // real vehicle speed (carState)
+            speedMps = LatestvEgo;
+            estimate = false;
+        } else if (OBDData.connected && !Float.isNaN(OBDData.speedKph)
+                && (now - OBDData.lastUpdateMs) < 2000) {   // real OBD speed (ELM327)
+            speedMps = OBDData.speedKph / 3.6f;
+            estimate = false;
+        } else if (modelAlive || SpeedData.gpsHasFix) {     // model+GPS estimate
+            speedMps = estSpeedMps;
+            estimate = true;
+        } else {                                            // no speed signal yet
+            velocityLabel.setText("");
+            velocityUnitLabel.setText("");
+            return;
+        }
+        float disp = isMetric ? speedMps * 3.6f : speedMps * 2.23694f;
+        velocityLabel.setText(Integer.toString(Math.round(disp)));
+        velocityUnitLabel.setText((isMetric ? "km/h" : "mph") + (estimate ? " est" : ""));
+        if (estimate) {   // light blue = estimated
+            velocityLabel.setColor(0.5f, 0.8f, 1f, 1f);
+            velocityUnitLabel.setColor(0.5f, 0.8f, 1f, 1f);
+        } else {          // green = real vehicle speed
+            velocityLabel.setColor(0.5f, 1f, 0.5f, 1f);
+            velocityUnitLabel.setColor(0.5f, 1f, 0.5f, 1f);
+        }
     }
 
     @Override
@@ -869,7 +944,9 @@ public class OnRoadScreen extends ScreenAdapter {
         elapsed += Gdx.graphics.getDeltaTime();
 
         String noDebugInfo = null;
-        if (appContext.isOnRoad && NoDebugMessagesWarning())
+        // The debug heartbeat only exists in ELM327 advisory mode; without it this banner was a
+        // false alarm (no control/planner backend runs in the camera+model-only build).
+        if (appContext.isOnRoad && advisoryMode && NoDebugMessagesWarning())
             noDebugInfo = "System Unresponsive!";
 
         if (appContext.isOnRoad) {
@@ -893,10 +970,10 @@ public class OnRoadScreen extends ScreenAdapter {
                 HideInfoTable = false;
             }
 
-            setUnits();
-
             if (sh.updated(carStateTopic))
                 updateCarState();
+
+            refreshSpeed();
 
             drawAlert(controlState, noDebugInfo);
 
@@ -912,7 +989,8 @@ public class OnRoadScreen extends ScreenAdapter {
 
             batch.begin();
             appContext.font.setColor(1, 1, 1, 1);
-            appContext.font.draw(batch, "L1: " + Line1 + "\nL2: " + Line2,3,200);
+            if (advisoryMode) // debug feed only present in ELM327 advisory mode
+                appContext.font.draw(batch, "L1: " + Line1 + "\nL2: " + Line2,3,200);
             appContext.font.draw(batch, utils.F2 ? "Medium Model" : "Big Model", Gdx.graphics.getWidth() - 450f, 300f);
             appContext.font.draw(batch, "v" + VERSION + ", E" + CamExposure + ":" + currentExposureIndex, Gdx.graphics.getWidth() - 450f, 225f);
             appContext.font.draw(batch, tempStr + ", " + ModelExecutorF3.AvgIterationTime + "ms", Gdx.graphics.getWidth() - 450f, 150f);
